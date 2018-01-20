@@ -67,9 +67,9 @@ def yuv2rgb(img, yuv_buffer, format_sel):
             img[j][i][2] = r
     return img
 
-def open_img():
-    print 'Supports bmp/jpg/png files input.Enter your image name:'
-    file_name = raw_input()
+def open_img(file_name):
+    print 'Supports bmp/jpg/png files input.'
+    #file_name = raw_input()
     file_name_0 = os.path.basename(file_name)
     file_name_1, file_format = file_name_0.split('.')
 
@@ -162,9 +162,9 @@ def rgb2yuv(img, format_sel):
                 yuv_buffer.append(int(v)) #append v
     return yuv_buffer
  
-def write_img(img):
-    print 'Supports bmp,jpg,yuv422,yuv444 and raw files output.Enter your output file name:'
-    file_name = raw_input()
+def write_img(img, file_name):
+    print 'Supports bmp,jpg,yuv422,yuv444 and raw files output.'
+    #file_name = raw_input()
     file_name = os.path.basename(file_name)
     file_name_0, file_format = file_name.split('.')
     if (file_format == 'bmp') or (file_format == 'jpg'):
@@ -194,6 +194,8 @@ def write_img(img):
         print "don't support this format"
 
 if __name__ == '__main__':
-    img = open_img()
+    img = open_img("../img/1.bmp")
     get_img_info(img)
-    write_img(img)
+    write_img(img, '1.raw')
+    write_img(img, '1.yuv422')    
+    write_img(img, '1.yuv444')
