@@ -15,6 +15,10 @@ def create_img(vsize, hsize, chn):
     img = np.zeros((vsize, hsize, chn), np.uint8)
     return img
 
+def resize_img(new_vsize, new_hsize, img):
+    img = cv2.resize(img, (new_hsize, new_vsize), interpolation=cv2.INTER_CUBIC)
+    return img
+
 def raw2rgb(img, raw_buffer):
     vsize, hsize, chn = img.shape
     for j in range(vsize):
@@ -195,6 +199,8 @@ def write_img(img, file_name):
 
 if __name__ == '__main__':
     img = open_img("../img/1.bmp")
+    get_img_info(img)
+    img = resize_img(480, 640, img)
     get_img_info(img)
     write_img(img, '1.raw')
     write_img(img, '1.yuv422')    
