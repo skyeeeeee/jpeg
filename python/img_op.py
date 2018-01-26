@@ -123,6 +123,7 @@ def get_img_info(img):
     print 'img shape info:', img.shape
     print 'img size info:', img.size
     print 'img data type info:', img.dtype
+    return img.shape
  
 def rgb2raw(img):
     vsize, hsize, chn = img.shape
