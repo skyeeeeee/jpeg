@@ -9,6 +9,7 @@ Created on Sat Jan 23 20:35:23 2018
 
 import img_op
 import math
+import cv2
 
 '''
 Based on itu-t81 AnnexK.1
@@ -141,16 +142,16 @@ def qt(dctblock, qt):
 功能描述： zigzag重排
 参数说明：
     block -- 输入8x8block 量化结果
-    zz    -- zz表
+    zzt   -- zz表
 返回值  ： 重排结果，EOB位置
 '''
-def zigzag(qtblock, zz):
+def zigzag(qtblock, zzt):
     zblock = []
     eob = 64
     for i in range(DCTBLOCKSIZE):
         zblock.append(0)
     for i in range(DCTBLOCKSIZE):
-        zblock[zz[i]] = qtblock[i]
+        zblock[zzt[i]] = qtblock[i]
     for i in range(DCTBLOCKSIZE):
         if (zblock[DCTBLOCKSIZE - i - 1] == 0):
             eob = DCTBLOCKSIZE - i -1
@@ -235,7 +236,7 @@ def buildhuftab(huf_bits, huf_value):
     k = 0
     code = 0
     for i in range(256):
-        huftab.append(0)
+        huftab.append((0, 0))
     
     for i in range(16):
         for j in range(huf_bits[i]):
@@ -254,17 +255,18 @@ def buildhuftab(huf_bits, huf_value):
 返回值  ： rleblock， 包含（前面0的数目， 数据）
 '''
 def rle(zblock, eob):
-    zeronum = 0
+    zero_num = 0
     rleblock = []
     for i in range(eob - 1):
         if zblock[i+1] == 0:
             zero_num = zero_num + 1
             if zero_num == 16:
                 zero_num = 0
-                rleblock.append(16, 0)
+                rleblock.append((16, 0))
         else:
-            rleblock.append(zero_num, zblock[i])
+            rleblock.append((zero_num, zblock[i+1]))
             zero_num = 0
+    return rleblock        
 
 '''
 方法名称： jfifo
@@ -275,8 +277,28 @@ def rle(zblock, eob):
     filename -- 写入文件名
 返回值  ： 
 '''
+global bytenew
+global bytepos
+bytenew = 0
+bytepos = 7
+
 def jfifo(vlc_code, vlc_length, filename):
-    pass
+    global bytenew
+    global bytepos
+    mask = [1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768] 
+    for i in range(vlc_length):
+        posval = vlc_length  - i - 1
+        if vlc_code & mask[posval]:
+            bytenew = bytenew | mask[bytepos]
+        bytepos = bytepos - 1
+        if bytepos < 0:
+            if bytenew == 0xff:
+                filename.write(chr(0xff))
+                filename.write(chr(0x00))
+            else:
+                filename.write(chr(bytenew))
+            bytepos = 7
+            bytenew = 0
 
 '''
 方法名称： jpg_wrsoi
@@ -302,9 +324,9 @@ def jpg_wrsoi(filename):
 def jpg_wrapp0(filename):
     app0 = []
     app0.append(0xff)
-    app0.append(0xe0)
+    app0.append(0xe0) #0xFFE0 APP0
     app0.append(0x00)
-    app0.append(0x10)
+    app0.append(0x10) #Application data segment length
     app0.append(ord('J'))
     app0.append(ord('F'))
     app0.append(ord('I'))
@@ -321,7 +343,6 @@ def jpg_wrapp0(filename):
     app0.append(0x00)
     for i in range(len(app0)):
         filename.write(chr(app0[i]))
-    
 
 '''
 方法名称： jpg_wrdqt
@@ -335,14 +356,18 @@ def jpg_wrapp0(filename):
 def jpg_wrdqt(ydqt, uvdqt, filename):
     dqt = []
     dqt.append(0xff)
-    dqt.append(0xdb)
-    dqt.append(0x00)
-    dqt.append(0x43)
+    dqt.append(0xdb) #0xFFDB define quantization table
+    dqt.append(0x00) 
+    dqt.append(0x43) #Quantization table definition length = 2 + (1+64)
     #append y qt
     dqt.append(0x00)
     for i in range(DCTBLOCKSIZE):
         dqt.append(ydqt[i])
     #append uv qt
+    dqt.append(0xff)
+    dqt.append(0xdb) #0xFFDB define quantization table
+    dqt.append(0x00) 
+    dqt.append(0x43) #Quantization table definition length = 2 + (1+64)
     dqt.append(0x01)
     for i in range(DCTBLOCKSIZE):
         dqt.append(uvdqt[i])
@@ -374,16 +399,16 @@ def jpg_wrsof(hsize, vsize, filename):
     sof.append(vsize_l)
     sof.append(hsize_h) #width
     sof.append(hsize_l)
-    sof.append(0x03)
-    sof.append(0x01)
-    sof.append(0x00)
-    sof.append(0x02)
-    sof.append(0x01)
-    sof.append(0x03)
-    sof.append(0x01)
-    sof.append(0x11)
-    sof.append(0x11)
-    sof.append(0x11)
+    sof.append(0x03) #Y,U and V component
+    sof.append(0x01) #Y ID
+    sof.append(0x11) #Y sampling factor
+    sof.append(0x00) #Y quantization table
+    sof.append(0x02) #U ID
+    sof.append(0x11) #U sampling factor
+    sof.append(0x01) #Y quantization table 
+    sof.append(0x03) #V ID 
+    sof.append(0x11) #V sampling factor
+    sof.append(0x01) #V quantization table
     for i in range(len(sof)):
         filename.write(chr(sof[i]))
 
@@ -400,34 +425,45 @@ def jpg_wrsof(hsize, vsize, filename):
 '''
 def jpg_wrdht(filename):
     dht = []
+    #append Y_DC
     dht.append(0xff)
     dht.append(0xc4)
     length = 19 + 12
     dht.append((length & 0xff00) >> 8)
     dht.append(length & 0xff)
-    #append Y_DC
     dht.append(0x00)
     for i in range(len(STD_Y_DC_HUFSIZE)):
         dht.append(STD_Y_DC_HUFSIZE[i])
     for i in range(len(STD_Y_DC_HUFVALU)):
         dht.append(STD_Y_DC_HUFVALU[i])
     #append UV_DC
+    dht.append(0xff)
+    dht.append(0xc4)
+    length = 19 + 12
+    dht.append((length & 0xff00) >> 8)
+    dht.append(length & 0xff)
     dht.append(0x01)
     for i in range(len(STD_UV_DC_HUFSIZE)):
         dht.append(STD_UV_DC_HUFSIZE[i])
     for i in range(len(STD_UV_DC_HUFVALU)):
         dht.append(STD_UV_DC_HUFVALU[i])
-
+    #append Y_AC
+    dht.append(0xff)
+    dht.append(0xc4)
     length = 19 + 162
     dht.append((length & 0xff00) >> 8)
     dht.append(length & 0xff)
-    #append Y_AC
     dht.append(0x10)
     for i in range(len(STD_Y_AC_HUFSIZE)):
         dht.append(STD_Y_AC_HUFSIZE[i])
     for i in range(len(STD_Y_AC_HUFVALU)):
         dht.append(STD_Y_AC_HUFVALU[i])
     #append UV_DC
+    dht.append(0xff)
+    dht.append(0xc4)
+    length = 19 + 162
+    dht.append((length & 0xff00) >> 8)
+    dht.append(length & 0xff)
     dht.append(0x11)
     for i in range(len(STD_UV_AC_HUFSIZE)):
         dht.append(STD_UV_AC_HUFSIZE[i])
@@ -447,19 +483,19 @@ def jpg_wrdht(filename):
 def jpg_wrsos(filename):
     sos = []
     sos.append(0xff)
-    sos.append(0xda)
+    sos.append(0xda) #SOS 
     sos.append(0x00)
-    sos.append(0xc0)
-    sos.append(0x03)
-    sos.append(0x01)
-    sos.append(0x00)
-    sos.append(0x02)
-    sos.append(0x11)
-    sos.append(0x03)
-    sos.append(0x11)
-    sos.append(0x3f)
-    sos.append(0x00)
-    sos.append(0x00)
+    sos.append(0x0c) #length
+    sos.append(0x03) #component num
+    sos.append(0x01) #YID
+    sos.append(0x00) #HTY
+    sos.append(0x02) #UID
+    sos.append(0x11) #HTU
+    sos.append(0x03) #VID
+    sos.append(0x11) #HTV
+    sos.append(0x00) #SS
+    sos.append(0x3f) #SE
+    sos.append(0x00) #BF
     #write file
     for i in range(len(sos)):
         filename.write(chr(sos[i]))
@@ -496,6 +532,19 @@ def jpg_process_data(y_buff, u_buff, vbuff, filename, y_dc_huf_table, uv_dc_huf_
     y_buf = []
     u_buf = []
     v_buf = []
+
+    global bytenew
+    global bytepos
+    bytenew = 0
+    bytepos = 7
+    
+    for i in range(DCTBLOCKSIZE):
+        y_buf.append(0)
+    for i in range(DCTBLOCKSIZE):
+        u_buf.append(0)
+    for i in range(DCTBLOCKSIZE):
+        v_buf.append(0)
+
     y_dc = 0
     u_dc = 0
     v_dc = 0
@@ -503,7 +552,7 @@ def jpg_process_data(y_buff, u_buff, vbuff, filename, y_dc_huf_table, uv_dc_huf_
     for mcu_cnt in range(mcu_num):
         # do Y chn
         for i in range(DCTBLOCKSIZE):
-            y_buf.append(y_buff.pop(0) - 128)
+            y_buf[i] = y_buff[mcu_cnt*DCTBLOCKSIZE + i] - 128
         dctblock = fdct(y_buf)
         qtblock = qt(dctblock, STD_Y_QT)
         zblock, eob = zigzag(qtblock, STD_ZIGZAGT)
@@ -513,8 +562,8 @@ def jpg_process_data(y_buff, u_buff, vbuff, filename, y_dc_huf_table, uv_dc_huf_
         if diffval == 0:
             jfifo(y_dc_huf_table[0][0], y_dc_huf_table[0][1], filename)
         else:
-            jfifo(y_dc_huf_table[diffval][0], y_dc_huf_table[diffval][1], filename)
             amplitude, code_len = getvli(diffval, vlitable)
+            jfifo(y_dc_huf_table[code_len][0], y_dc_huf_table[code_len][1], filename)
             jfifo(amplitude, code_len, filename)
         #交流编码
         if eob == 1: #所有AC分量都为0
@@ -522,17 +571,18 @@ def jpg_process_data(y_buff, u_buff, vbuff, filename, y_dc_huf_table, uv_dc_huf_
         else:
             rleblock = rle(zblock, eob)
             for i in range(len(rleblock)):
-               if rleblock[i][0] == 16:
-                   jfifo(y_ac_huf_table[0xf0][0], y_ac_huf_table[0xf0][1], filename)
-               else:
-                   amplitude, code_len = getvli(rleblock[i][1], vlitable)
-                   jfifo(y_ac_huf_table[rleblock[i] * 16 + code_len][0], y_ac_huf_table[rleblock[i] * 16 + code_len][1], filename)
-                   jfifo(amplitude, code_len, filename)
+                if rleblock[i][0] == 16:
+                    jfifo(y_ac_huf_table[0xf0][0], y_ac_huf_table[0xf0][1], filename)
+                else:
+                    amplitude, code_len = getvli(rleblock[i][1], vlitable)
+                    jfifo(y_ac_huf_table[rleblock[i][0] * 16 + code_len][0], y_ac_huf_table[rleblock[i][0] * 16 + code_len][1], filename)
+                    jfifo(amplitude, code_len, filename)
         if len(rleblock) != 63:
             jfifo(y_ac_huf_table[0][0], y_ac_huf_table[0][1], filename)
             	
         # do U chnfor i in range(DCTBLOCKSIZE):
-        u_buf.append(u_buff.pop(0) - 128)
+        for i in range(DCTBLOCKSIZE):
+            u_buf[i] = u_buff[mcu_cnt*DCTBLOCKSIZE + i] - 128
         dctblock = fdct(u_buf)
         qtblock = qt(dctblock, STD_UV_QT)
         zblock, eob = zigzag(qtblock, STD_ZIGZAGT)
@@ -542,8 +592,8 @@ def jpg_process_data(y_buff, u_buff, vbuff, filename, y_dc_huf_table, uv_dc_huf_
         if diffval == 0:
             jfifo(uv_dc_huf_table[0][0], uv_dc_huf_table[0][1], filename)
         else:
-            jfifo(uv_dc_huf_table[diffval][0], uv_dc_huf_table[diffval][1], filename)
             amplitude, code_len = getvli(diffval, vlitable)
+            jfifo(uv_dc_huf_table[code_len][0], uv_dc_huf_table[code_len][1], filename)
             jfifo(amplitude, code_len, filename)
         #交流编码
         if eob == 1: #所有AC分量都为0
@@ -555,13 +605,14 @@ def jpg_process_data(y_buff, u_buff, vbuff, filename, y_dc_huf_table, uv_dc_huf_
                     jfifo(uv_ac_huf_table[0xf0][0], uv_ac_huf_table[0xf0][1], filename)
                 else:
                     amplitude, code_len = getvli(rleblock[i][1], vlitable)
-                    jfifo(uv_ac_huf_table[rleblock[i] * 16 + code_len][0], uv_ac_huf_table[rleblock[i] * 16 + code_len][1], filename)
+                    jfifo(uv_ac_huf_table[rleblock[i][0] * 16 + code_len][0], uv_ac_huf_table[rleblock[i][0] * 16 + code_len][1], filename)
                     jfifo(amplitude, code_len, filename)
         if len(rleblock) != 63:
             jfifo(uv_ac_huf_table[0][0], uv_ac_huf_table[0][1], filename)
        
         # do V chn
-        v_buf.append(v_buff.pop(0) - 128)
+        for i in range(DCTBLOCKSIZE):
+            v_buf[i] = v_buff[mcu_cnt*DCTBLOCKSIZE + i] - 128
         dctblock = fdct(v_buf)
         qtblock = qt(dctblock, STD_UV_QT)
         zblock, eob = zigzag(qtblock, STD_ZIGZAGT)
@@ -571,8 +622,8 @@ def jpg_process_data(y_buff, u_buff, vbuff, filename, y_dc_huf_table, uv_dc_huf_
         if diffval == 0:
             jfifo(uv_dc_huf_table[0][0], uv_dc_huf_table[0][1], filename)
         else:
-            jfifo(uv_dc_huf_table[diffval][0], uv_dc_huf_table[diffval][1], filename)
             amplitude, code_len = getvli(diffval, vlitable)
+            jfifo(uv_dc_huf_table[code_len][0], uv_dc_huf_table[code_len][1], filename)
             jfifo(amplitude, code_len, filename)
         #交流编码
         if eob == 1: #所有AC分量都为0
@@ -584,7 +635,7 @@ def jpg_process_data(y_buff, u_buff, vbuff, filename, y_dc_huf_table, uv_dc_huf_
                     jfifo(uv_ac_huf_table[0xf0][0], uv_ac_huf_table[0xf0][1], filename)
                 else:
                     amplitude, code_len = getvli(rleblock[i][1], vlitable)
-                    jfifo(uv_ac_huf_table[rleblock[i] * 16 + code_len][0], uv_ac_huf_table[rleblock[i] * 16 + code_len][1], filename)
+                    jfifo(uv_ac_huf_table[rleblock[i][0] * 16 + code_len][0], uv_ac_huf_table[rleblock[i][0] * 16 + code_len][1], filename)
                     jfifo(amplitude, code_len, filename)
         if len(rleblock) != 63:
             jfifo(uv_ac_huf_table[0x00][0], uv_ac_huf_table[0x00][1], filename)
@@ -593,6 +644,9 @@ if __name__ == '__main__':
     img = img_op.open_img("../img/1.bmp")
     img_op.get_img_info(img)
     img = img_op.resize_img(240, 320, img)
+    cv2.imshow("img_new", img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
     img_op.get_img_info(img)
     #提取图像信息
     img_hsize = img_op.get_img_info(img)[1]
